@@ -15,6 +15,8 @@ from app.models import Question_constructor, Choice_constructor, \
 
 app_dir = os.getcwd()
 
+#path to users_pictures folder
+UPLOAD_FOLDER = 'app/static/users_pictures'
 
 def prepare_env():
     config = configparser.ConfigParser()
@@ -37,6 +39,7 @@ def create_app(config=Config):
     app.config.from_object(config)
     app.secret_key = os.urandom(24)
     app.register_blueprint(main)
+    app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
     Menu(app=app)
     db.init_app(app)
     login_manager.init_app(app)
