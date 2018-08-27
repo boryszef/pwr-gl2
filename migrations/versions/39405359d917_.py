@@ -87,6 +87,10 @@ def add_data():
         questions = yaml.load(fp.read())
     session.add_all(questions)
     session.commit()
+    with open(app_dir+"/conscientiousness.yml") as fp:
+        questions = yaml.load(fp.read())
+    session.add_all(questions)
+    session.commit()
 
 
 def upgrade():
@@ -124,6 +128,7 @@ def upgrade():
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=True),
     sa.Column('friend_id', sa.Integer(), nullable=True),
+    sa.Column('request', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['friend_id'], ['user.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('id')

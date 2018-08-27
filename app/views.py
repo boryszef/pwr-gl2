@@ -13,10 +13,12 @@ from .forms import LoginForm, RegistrationForm, QuestionareForm, \
 from .token import generate_confirmation_token, confirm_token
 from .email import send_email
 from random import randint
+from .newfriends import isfriend, isrequest, getrecivedreq, getsentreq, getfriends
 from strgen import StringGenerator
 from .helper import flash_errors, genome, selfassesmenttraitsresults, \
                     mean_user_scores, mean_user_scores_percentage, \
-                    friend_assesment_result, make_filter
+                    friend_assesment_result, make_filter, friend_mean_user_scores, \
+                    friend_mean_user_scores_percentage, friend_answer_from_one
 import app
 
 
@@ -213,7 +215,7 @@ def results_radar():                                        #mozna dodac ze jesl
             {'label': 'Self-assesment',
              'data': selfassesment }
                  ]}
-    friendassesment = [int(x*5/100) for x in friend_assesment_result()]
+    friendassesment = friend_mean_user_scores()
     chart_data_friends={
         'labels': [r for r in handled_traits],
         'datasets': [
@@ -247,7 +249,7 @@ def results_bars():
     answers = [mean_user_scores_percentage(),
                [int(x*100/5) for x in genome()[1].get("datasets")[0].get("data")],
                selfassesmenttraitsresults(),
-               friend_assesment_result()]
+               friend_mean_user_scores_percentage()]
     colours = ['#e95095', '#ffcc00', 'orange', 'deepskyblue', 'green']
     return render_template('all_in_one_results_bar.html',
                            trait=handled_traits,
@@ -455,7 +457,7 @@ def search():
                                        User.id,
                                        User.email,
                                        User.username).filter(flt).all()
-    current_user_friends = [x.friend_id for x in Friends.query.filter_by(user_id=current_user.id).all()]
+    current_user_friends = [x.id for x in getfriends(current_user.id)]
     results = [x for x in results if not x[2] in current_user_friends] #add only firends which are not in your friends already
     if len(results)==0:
         text = "No new friends with this data :)"
@@ -463,7 +465,7 @@ def search():
     # Adding friends to DB
     if form_request.is_submitted():
         friend_id = request.form['submit']
-        is_friend = db.session.query(Friends).filter_by(user_id= current_user.id).filter_by(friend_id=friend_id).first()
+        is_friend = isfriend(current_user.id, friend_id)
         if user_id == friend_id:
             flash('You can not add yourself')
         elif is_friend:
@@ -471,7 +473,8 @@ def search():
         else:
             flash('You added new friend')
             connection = Friends(user_id=int(user_id),
-                                friend_id=int(friend_id))
+                                friend_id=int(friend_id),
+                                request=False)
             db.session.add(connection)
             db.session.commit()
     return render_template('search.html', results=results, form=form_request, user_id=user_id, user=current_user, text=text)
@@ -487,59 +490,131 @@ def user_friends():
         session['id']=request.form['submit']    #send friend ID to fiendassesment to know which friend to assess
         return redirect(url_for("main.friend_choose_trait_test")) #could be friendasessment and will be ok too!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     text=""
-    user_friends= [User.query.filter_by(id=x.friend_id).first() for x in Friends.query.filter_by(user_id=current_user.id).all()]
-
+    #user_friends = [User.query.filter_by(id=x.friend_id).first() for x in Friends.query.filter_by(user_id=current_user.id).all()]
+    user_friends = getfriends(current_user.id)
     if not user_friends:
         text="There are no friends yet:< Try to find some!"
     return render_template('user_friends.html', results=user_friends, user_id=current_user, text=text, form=form )
 
-
-
-
-x=0
-ans=[0 for x in handled_traits]
-@main.route("/friendasessment", methods=['GET', 'POST'])
+@main.route("/friend_request", methods=['GET', 'POST'])
 @login_required
-def friendasessment():
-    '''Friend assesment bars questionaire - from 1 to 5 how is he'''
+@register_menu(main, '.friend_request', 'Friend Requests', order=9,
+               visible_when=lambda: current_user.is_authenticated)
+def friend_request():
+    form = FriendRequest()
+    if form.is_submitted():
+        friend_id=request.form['submit'] 
+        if request.form['status'].strip() == 'refuse':
+            if isrequest(current_user.id, friend_id):
+                fquery = Friends.query.filter_by(user_id = friend_id, friend_id = current_user.id).one()
+                db.session.delete(fquery)
+                db.session.commit()
+                flash("Your friend request refused", "info")
+        elif request.form['status'].strip() == 'accept':
+            if isrequest(current_user.id, friend_id):
+                fquery = db.session.query(Friends).\
+                    filter_by(user_id = friend_id, 
+                    friend_id = current_user.id, 
+                    request = False).\
+                    first()
+                fquery.request = True
+                db.session.commit()
+                flash("Your friend request succesfully accepted", "info")
+        else:
+            flash("An error occured during addition of friend")
+    text=""
+    friendrequests = getrecivedreq(current_user.id)
+    if not user_friends:
+        text="There are no friends requests yet:<"
+    return render_template('friend_request.html', results=friendrequests, user_id=current_user, text=text, form=form )
+
+@main.route("/user_friends", methods=['GET', 'POST'])
+@login_required
+@register_menu(main, '.user_friends', 'Your friends', order=8,
+               visible_when=lambda: current_user.is_authenticated)
+def user_friends():
+    form = FriendRequest()
+    if form.is_submitted():
+        if request.form['submit'].split()[0] == 'submit':
+            session['id'] = request.form['submit'].split()[1]
+            return redirect(url_for('main.friend_profile'))
+        else:
+            session['id']=request.form['submit']    #send friend ID to fiendassesment to know which friend to assess
+            return redirect(url_for("main.friend_choose_trait_test")) #could be friendasessment and will be ok too!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    text=""
+    user_friends= [User.query.filter_by(id=x.friend_id).first() for x in Friends.query.filter_by(user_id=current_user.id).all()]
+    user_firends_which_answered_id = set([x.friend_id for x in FriendAnswer.query.filter_by(user_id=current_user.id)])
+    results_from_friend= [[friend_answer_from_one(trait, friend_id) for trait in handled_traits] for friend_id in
+                            user_firends_which_answered_id]
+
+    # for x in range(len(user_firends_which_answered_id)):
+
+
+    # user_firends_which_answered= {
+    #         'id' : user_firends_which_answered_id,    #id of friends which make assesment of current_user
+    #         'results_from_friend' : [[friend_answer_from_one(trait, friend_id) for trait in handled_traits] for friend_id in user_firends_which_answered_id] #table of tablech where each friend which answer answers is stored in table in order as handled_traits
+    #         }
+
+    if not user_friends:
+        text="There are no friends yet:< Try to find some!"
+    return render_template('user_friends.html', results=user_friends, user_id=current_user, text=text, form=form,
+                           results_from_friend=results_from_friend, user_firends_which_answered_id=user_firends_which_answered_id )
+
+@main.route("/friend_profile", methods=['GET', 'POST'])
+@login_required
+def friend_profile():
+    form = ChooseTraitTestForm()
     friend_id = session['id']
-    name = User.query.filter_by(id=friend_id).first() #name to diplay "How do u think user is
-    #this 2 global are bad, but it is working, so lets left it here
-    global x
-    global ans
-    traits = handled_traits #take trait tuple
-    form= SelfAssesmentBarsForm()
+    friend = db.session.query(User).filter_by(id=friend_id).first()
 
-    #if user dont answer to all traits
-    if x < len(traits):
-        trait = traits[x]
-        # if form.validate_on_submit():
-        if form.is_submitted():
-            ans[x]=int(form.answers.data)*20 #to make it from 20% to 100%
-            x+=1
-            # take next trait
-        try:
-            trait = traits[x]   #at the end, the index will be out of handled_traits tuple, so. Here it is neccessary to noc answer first question 2 times at the beggining.
-            return render_template('selfassesmentbar.html', form=form, trait=trait, user=name, visible=True) # go next trait quiz
-        except IndexError:
-            pass
-
-    friend_traits= db.session.query(FriendAssesment).filter_by(friend_id=current_user.id).filter_by(user_id=friend_id).first()
-    if friend_traits: #if user already answered to questions change his answer to new one
-        friend_traits.agreeableness=ans[0]
-        friend_traits.conscientiousness=ans[1]
-        friend_traits.extraversion =ans[2]
-        friend_traits.neuroticism=ans[3]
-        friend_traits.openness=ans[4]
-    else: #if not, add him to database
-        sat= FriendAssesment(agreeableness=ans[0], conscientiousness=ans[1], extraversion =ans[2],
-                                 neuroticism=ans[3], openness=ans[4], user_id =friend_id, friend_id=current_user.id)
-        db.session.add(sat)
-    db.session.commit()
-    x=0
-    flash("You made an assesment of your friend.")
-    return redirect(url_for('main.user_friends'))
-
+    return render_template('friend_profile.html', result=friend, form=form)
+'''We dont use it, but it works fine if we weill want to'''
+#
+# x=0
+# ans=[0 for x in handled_traits]
+# @main.route("/friendasessment", methods=['GET', 'POST'])
+# @login_required
+# def friendasessment():
+#     '''Friend assesment bars questionaire - from 1 to 5 how is he'''
+#     friend_id = session['id']
+#     name = User.query.filter_by(id=friend_id).first() #name to diplay "How do u think user is
+#     #this 2 global are bad, but it is working, so lets left it here
+#     global x
+#     global ans
+#     traits = handled_traits #take trait tuple
+#     form= SelfAssesmentBarsForm()
+#
+#     #if user dont answer to all traits
+#     if x < len(traits):
+#         trait = traits[x]
+#         # if form.validate_on_submit():
+#         if form.is_submitted():
+#             ans[x]=int(form.answers.data)*20 #to make it from 20% to 100%
+#             x+=1
+#             # take next trait
+#         try:
+#             trait = traits[x]   #at the end, the index will be out of handled_traits tuple, so. Here it is neccessary to noc answer first question 2 times at the beggining.
+#             return render_template('selfassesmentbar.html', form=form, trait=trait, user=name, visible=True) # go next trait quiz
+#         except IndexError:
+#             pass
+#
+#     friend_traits= db.session.query(FriendAssesment).filter_by(friend_id=current_user.id).filter_by(user_id=friend_id).first()
+#     if friend_traits: #if user already answered to questions change his answer to new one
+#         friend_traits.agreeableness=ans[0]
+#         friend_traits.conscientiousness=ans[1]
+#         friend_traits.extraversion =ans[2]
+#         friend_traits.neuroticism=ans[3]
+#         friend_traits.openness=ans[4]
+#     else: #if not, add him to database
+#         sat= FriendAssesment(agreeableness=ans[0], conscientiousness=ans[1], extraversion =ans[2],
+#                                  neuroticism=ans[3], openness=ans[4], user_id =friend_id, friend_id=current_user.id)
+#         db.session.add(sat)
+#     db.session.commit()
+#     x=0
+#     flash("You made an assesment of your friend.")
+#     return redirect(url_for('main.user_friends'))
+#
 
 
 
@@ -636,7 +711,7 @@ def friend_questionare():
     data = {
         'question': question.value,
         'id': question.id,
-        'count': number_of_questions}
+        'count': (number_of_questions)}
     return render_template('questionare.html', data=data, form=form, user=name, visible=True)
 
 
