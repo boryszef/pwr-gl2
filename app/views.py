@@ -420,7 +420,7 @@ def upload_file():
     file.filename = current_user.username+".jpg"    #rename to username.jpg -important for the rest functions
     f = os.path.join(app.app.config['UPLOAD_FOLDER'], file.filename)
     file.save(f)
-    return render_template('index.userprofile')
+    return render_template('main.userprofile')
 
 
 
