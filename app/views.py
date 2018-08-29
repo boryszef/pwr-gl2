@@ -32,7 +32,12 @@ def index():
     f=open("app/templates/quotes.txt")
     lines = f.readlines()
     '''Display main view of the app'''
-    return render_template('index.html', quote=lines[randint(0, len(lines)-1)])
+    try:
+        login = current_user.id
+        x=1
+    except AttributeError:
+        x=0
+    return render_template('index.html', quote=lines[randint(0, len(lines)-1)], login=x)
 
 @main.route("/choose_trait_test", methods=['GET', 'POST'])
 @login_required
@@ -42,10 +47,39 @@ def choose_trait_test():
     colors = ["#e95095", "#ffcc00", "orange", "deepskyblue", "green"]
     b_colors = ["#e95095", "#ffcc00", "orange", "deepskyblue", "green"]
     form = ChooseTraitTestForm()
+
+
     if form.is_submitted():
-        return redirect(url_for("main.questionare", trait=request.form['submit']))
+        return redirect(url_for("main.trait_description", trait=request.form['submit']))
     return render_template("choose_trait_test.html", handled_traits=handled_traits, form=form, colors=colors[::-1], b_colors=b_colors[::-1])
 
+@main.route("/trait_description", methods=['GET', 'POST'])
+@login_required
+def trait_description():
+    trait = request.args['trait']
+    form = ChooseTraitTestForm()
+    if form.is_submitted():
+        return redirect(url_for("main.questionare", trait=trait))
+
+    trait_desription= {
+                    "agreeableness":["How agreeable are you? Let’s find out!",
+                        "Score obtained in this trait will tell you how compassionate and cooperative you are. The test will measure your kindness, trust and a tendecy to feel competitive. Do you forgive people easily? Do you believe in the importance of morality? ",
+                        "Find your Agreeableness shelf and share it with friends! "],
+                    "conscientiousness":["How conscientious are you? Let’s find out!",
+                        "Score obtained in this trait will tell you how hard-working you are. The test will measure your ability of sticking to the plan, abiding rules and the effort that you put into tasks. Is it hard for you to start working? Are you making obligations that you haven’t thought through?",
+                        "Find your conscientiousness shelf and share it with friends! "],
+                    "extraversion": ["How extravertive are you? Let’s find out!",
+                        "Score obtained in this trait will tell you how social you are. The test will measure comfort that you feel when you are among people and where you are alone. Are you the life of a party? Do you enjoy social gatherings? Do you like being in the center of attention?",
+                        "Find your Extraversion shelf and share it with friends! "],
+                    "neuroticism":["How neurotic are you? Let’s find out!",
+                        "Score obtained in this trait will tell you how you handle stressful situations. The test will measure your ability to remain calm and composed when required. It evaluates your susceptibility to the negative emotions in tensed circumstances. Do you get depressed easily or are you vulnerable to exasperating scenarios?",
+                        "Find your Neuroticism shelf and share it with friends! "],
+                    "openness":["How open are you? Let’s find out!",
+                        "Score obtained in this trait will tell you if you are a practical person or more of a dreamer. The test will measure your creativity, ability of finding solutions for problems and your relationship with art, poetry and abstract ideas. Do you enjoy philosophical discussion? Are you up for an unexpected trip?",
+                        "Find your Openness shelf and share it with friends!",
+                    ]
+    }
+    return render_template('trait_description.html', trait=trait_desription.get(trait))
 
 @main.route("/questionare", methods=['GET', 'POST'])
 @login_required
@@ -206,21 +240,21 @@ def results_radar():                                        #mozna dodac ze jesl
     chart_data_test = {
         'labels': [r for r in handled_traits],
         'datasets': [
-            {'label': 'Personal test',
+            {'label': 'Personality test',
              'data':  mean_user_scores()}
                  ]}
     selfassesment =[int(x*5/100) for x in selfassesmenttraitsresults()] #this *5/100 is complicated... but it works...
     chart_data_self={
         'labels': [r for r in handled_traits],
         'datasets': [
-            {'label': 'Self-assesment',
+            {'label': 'Self-assessment',
              'data': selfassesment }
                  ]}
     friendassesment = friend_mean_user_scores()
     chart_data_friends={
         'labels': [r for r in handled_traits],
         'datasets': [
-            {'label': 'Friend-assesment',
+            {'label': 'Friend-assessment',
              'data': friendassesment}
                  ]}
     how_hany_trais = len(handled_traits)
@@ -241,14 +275,15 @@ def results_radar():                                        #mozna dodac ze jesl
 @register_menu(main, '.results_bars', 'Results bars', order=6,
                visible_when=lambda: current_user.is_authenticated)
 def results_bars():
-    rangee = [0,1]
-    range2 = [2,3]
     text = ["Test results",
             "Genomelink data",
-            "Self-assesment results",
-            "Friends assesment"]
+            "Self-assessment results",
+            "Friends assessment"]
+    genomee = [int(x*100/5) for x in genome()[1].get("datasets")[0].get("data")]
+    if genomee==[]:
+        genomee=[0,0,0,0,0]
     answers = [mean_user_scores_percentage(),
-               [int(x*100/5) for x in genome()[1].get("datasets")[0].get("data")],
+               genomee,
                selfassesmenttraitsresults(),
                friend_mean_user_scores_percentage()]
     colours = ['#e95095', '#ffcc00', 'orange', 'deepskyblue', 'green']
@@ -420,13 +455,13 @@ def upload_file():
     file.filename = current_user.username+".jpg"    #rename to username.jpg -important for the rest functions
     f = os.path.join(app.app.config['UPLOAD_FOLDER'], file.filename)
     file.save(f)
-    return render_template('main.userprofile')
+    return redirect(url_for('main.userprofile'))
 
 
 
 @main.route("/userprofile", methods=['GET', 'POST'])
 @login_required
-@register_menu(main, '.userprofile', 'Your profile', order=7,
+@register_menu(main, '.userprofile', 'YourShelf', order=13,
                visible_when=lambda: current_user.is_authenticated)
 def userprofile():
     '''userprofile'''
@@ -440,8 +475,32 @@ def userprofile():
             messages = ",".join(searchfriend)
         session['messages'] = messages
         return redirect(url_for('main.search', messages=messages))
-
-    return render_template('userprofile.html', user=current_user, form=form)
+    results= mean_user_scores_percentage()
+    if not results:
+        results=[-1,-1,-1,-1,-1]
+    text_results=[
+        ["""Low: You scored low in Agreeableness! You tend to put your own interest above others. You don't shy away from contradicting others. You think people should generaly rely more on themselves than on others. You are wary of people's intentions and don't trust them easily. You tend to be distanced and uncooperative.""",
+         """Average: You scored Medium in Agreeableness! It is quite important for you to get along with others but usually you put your interests above theirs. You don't find it difficult to trust people but you don't think that everyone deserves it. It takes some time but finally you are willing to forgive people and forget their mistakes.""",
+         """High: You scored high in Agreeableness! It is important for you to get along with others. You are willing to put aside your interest to help others. As an individual, you display facets like friendliness, generosity and consideration.Your basic belief in people are fundamentally fair, honest and trustworthy."""
+         ],
+        ["""Low: You scored low in Conscientiousness! Usually you work hard to get things done irrespective of whether you want to do it or not. You tend to waste your time and you don’t respect rules. Although, you tend to be more flexible, you often make obligations without thinking it through. Sometimes you don’t complete your work on time and it’s hard for you to complete working in a stressed atmosphere. You always do things at the last moment and usually you don’t have time to check them.""",
+         """Average: You scored Medium in Conscientiousness! You usually get things done before a deadline and sometimes you try to do more than is expected from you. You don’t tend to jump into things without thinking. You usually keep promises and try to follow the rules. It’s usually hard for you to start your work and you finish your work really often just at the last moment.""",
+         """High: You scored high in Conscientiousness! You are always prepared and you don’t waste your time. You always finish what you have started and you try to do more than is expected from you. You usually finish your work long before a deadline and you have time to check everything and refine it. You also don’t leave things undone. You always make obligations after thinking them through and you never make rash decisions. You keep promises and follow all the rules."""
+         ],
+        ["""Low: You scored low in Extraversion! You prefer to spend time alone than among people. You don't feel comfortable in the center of attention. Making a speech in from of people would be a struggle for you. You don't talk much but when you do - every word is already well-thought. You don't have much energy and social gatherings make you exhausted.""",
+         """Average: You scored Medium in Extraversion!  You enjoy time spent among people but you also like spending some time on your own. You can make a speech if that is expected from you and being in the center of attention doesn't make you abashed. You are quite energetic and usually you bring good vibes to the party!""",
+         """High: You scored high in Extraversion! You enjoy being among people. You are always energetic, cheerful and ready to rock the party! Making speeches in front of people doesn't make you abashed. You are expressive and get enthusiastic easily. Although, you often say things without thinking and that can bring some troubles."""
+         ],
+        ["""Low: You scored low in Neuroticism! You are very calm and definite in your decisions. You have an ability to stay composed in stressful situations. You are generaly confident about your decision-making skills and don't get depressed easily by failures. You are usually contented and optimistic.""",
+         """Average: You scored Medium in Neuroticism! Sometimes when you are emotionally weak you get depressed easily after small failures. You often get overwhelmed by tough sitations but after analyzing the root cause you try to conquer them. """,
+         """High: You scored high in Neuroticism! You respond to stress with irritability and you are heavy on mood swings. You get depressed easily and it's hard for you to overcome the failure. You are likely to be emotinally unstable to little things. You are also more susceptible to the negative emotions."""
+         ],
+        ["Low: You scored low in Openness! You prefer routine more than new challenges. You don’t rely on new, non-tried methods. You are analytical and you try to find the most practical solutions. When faced with a problem, you can decide really quickly. You don’t see value in art or abstract ideas. ",
+         """Average: You scored Medium in Openness! When faced with a problem, you are able to find a balance between practical, already tried ideas and ideas outside the box. You have a good imagination. At work, you expect tasks requiring creativity but sometimes you prefer the same routine. You usually try to understand reasons for someone’s behavior and you don’t categorize them as just black or white. """,
+         """High: You scored high in Openness! You are always full of ideas! You think outside the box and your curiosity of the word pushes you toward trying new things. You always try to understand what is the reason of someone’s behavior. You can’t stand monotonous routine at work. You desire new challenges and opportunities to use your creativity. You like adventurous things which fill your heart with content.  You admire art and value calm evenings when you can get lost in your thoughts."""
+         ]
+    ]
+    return render_template('userprofile.html', user=current_user, form=form, results=zip(results, handled_traits, text_results))
 
 
 @main.route("/search", methods=['GET', 'POST'])
@@ -458,7 +517,7 @@ def search():
                                        User.id,
                                        User.email,
                                        User.username).filter(flt).all()
-    current_user_friends = [x.friend_id for x in Friends.query.filter_by(user_id=current_user.id).all()]
+    current_user_friends = [x.user_id for x in Friends.query.filter_by(friend_id=current_user.id).all()]
     results = [x for x in results if not x[2] in current_user_friends] #add only firends which are not in your friends already
     if len(results)==0:
         text = "No new friends with this data :)"
@@ -466,11 +525,11 @@ def search():
     # Adding friends to DB
     if form_request.is_submitted():
         friend_id = request.form['submit']
-        is_friend = db.session.query(Friends).filter_by(user_id= current_user.id).filter_by(friend_id=friend_id).first()
+        is_friend = db.session.query(Friends).filter_by(user_id= friend_id).filter_by(friend_id=current_user.id).first()
         if user_id == friend_id:
             flash('You can not add yourself')
         elif is_friend:
-            flash('You are friends already')
+            flash('You already send request')
         else:
             flash('You send friend request')
             # connection = Friends(user_id=int(user_id),
@@ -771,7 +830,7 @@ def friend_request_test():
     if form.is_submitted():
         if request.form['submit']:
             session['id'] = request.form['submit']
-            friend = db.session.query(Friends).filter_by(user_id=int(session['id']), friend_id=current_user.id).first()
+            friend = db.session.query(Friends).filter_by(user_id=current_user.id, friend_id=int(session['id'])).first()
             friend.testrequest = False
             db.session.commit()
             return redirect(url_for('main.friend_choose_trait_test'))
